@@ -50,8 +50,8 @@ def train(model, train_loader, criterion, optimizer, device, dtype):
             pred_np = (pred_np > 0.5) * 255
             running_iou += iou_np(y_np, pred_np)
 
-    epoch_loss = running_loss / i
-    epoch_iou = running_iou / i
+    epoch_loss = running_loss / (i + 1)
+    epoch_iou = running_iou / (i + 1)
     
     return model, optimizer, epoch_loss, epoch_iou
 
@@ -72,18 +72,10 @@ def valid(model, valid_loader, criterion, device):
         pred_np = (pred_np > 0.5) * 255
         running_iou += iou_np(y_np, pred_np)
 
-    epoch_loss = running_loss / i
-    epoch_iou = running_iou / i
+    epoch_loss = running_loss / (i + 1)
+    epoch_iou = running_iou / (i + 1)
     
     return model, epoch_loss, epoch_iou
-
-
-def accuracy(mask, pred_mask):
-    intersect = np.sum(pred_mask * mask)
-    union = np.sum(pred_mask) + np.sum(mask) - intersect
-    xor = np.sum(mask == pred_mask)
-    acc = np.mean(xor/(union + xor - intersect))
-    return round(acc, 3)
 
 
 def iou_np(mask, pred):
