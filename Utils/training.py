@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-def training_loop(epochs, model, train_loader, valid_loader, criterion, optimizer, device, dtype):
+def training_loop(epochs, model, train_loader, valid_loader, criterion, optimizer, device, dtype, deeplab = False):
     train_losses = []
     train_iou_list = []
     valid_losses = []
@@ -12,12 +12,12 @@ def training_loop(epochs, model, train_loader, valid_loader, criterion, optimize
     for e in range(epochs):
         print("Epoch {0} out of {1}".format(e+1, epochs))
         
-        model, optimizer, train_loss, train_iou = train(model, train_loader, criterion, optimizer, device, dtype)
+        model, optimizer, train_loss, train_iou = train(model, train_loader, criterion, optimizer, device, dtype, deeplab)
         train_losses.append(train_loss)
         train_iou_list.append(train_iou)
         
         with torch.no_grad():
-            model, valid_loss, valid_iou = valid(model, valid_loader, criterion, device)
+            model, valid_loss, valid_iou = valid(model, valid_loader, criterion, device, deeplab)
             valid_losses.append(valid_loss)
             valid_iou_list.append(valid_iou)
         
@@ -28,7 +28,7 @@ def training_loop(epochs, model, train_loader, valid_loader, criterion, optimize
     
     return model, optimizer, train_losses, valid_losses, train_iou_list, valid_iou_list
 
-def train(model, train_loader, criterion, optimizer, device, dtype):
+def train(model, train_loader, criterion, optimizer, device, dtype, deeplab = False):
     model.train()
     running_loss = 0
     running_iou = 0
@@ -36,6 +36,8 @@ def train(model, train_loader, criterion, optimizer, device, dtype):
     for i, (x, y, z) in enumerate(tqdm(train_loader)):
         x = x.to(device, dtype=dtype)
         pred = model(x)
+        if deeplab:
+            pred = pred['out']
         y = y.to(device).type_as(pred)
         loss = criterion(pred, y)
 
@@ -55,7 +57,7 @@ def train(model, train_loader, criterion, optimizer, device, dtype):
     
     return model, optimizer, epoch_loss, epoch_iou
 
-def valid(model, valid_loader, criterion, device):
+def valid(model, valid_loader, criterion, device, deeplab = False):
     model.eval()
     running_loss = 0
     running_iou = 0
@@ -65,6 +67,8 @@ def valid(model, valid_loader, criterion, device):
         x = x.to(device)
         y = y.to(device)
         pred = model(x)
+        if deeplab:
+            pred = pred['out']
         loss = criterion(pred, y)
         running_loss += loss.item()
         y_np = y.cpu().numpy()
@@ -85,7 +89,7 @@ def iou_np(mask, pred):
     return iou_score
 
 
-def predict(model, image, img_size, threshold, device):
+def predict(model, image, img_size, threshold, device, deeplab = False):
     with torch.no_grad():
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = image.astype("float32") / 255.0
@@ -93,7 +97,11 @@ def predict(model, image, img_size, threshold, device):
         image = np.transpose(image, (2, 0, 1))
         image = np.expand_dims(image, 0)
         image_torch = torch.from_numpy(image).to(device)
-        predMask = model(image_torch).squeeze()
+        #predMask = model(image_torch).squeeze()
+        predMask = model(image_torch)
+        if deeplab:
+            predMask = predMask['out']
+        predMask = predMask.squeeze()
         predMask = torch.sigmoid(predMask)
         predMask = predMask.cpu().numpy()
         predMask = (predMask > threshold) * 255
