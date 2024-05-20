@@ -1,7 +1,10 @@
 import os
 import pandas as pd
 import numpy as np
+import torch
 from sklearn.model_selection import train_test_split
+from skimage import measure
+from shapely.geometry import Polygon, MultiPolygon
  
 
 def paths_dataset(path):
@@ -61,3 +64,31 @@ def get_label_id(label):
     "Gilt-Head Bream": 8,
     }
     return label_dict[label]
+
+def create_sub_mask_annotation(mask, num_objs = 1):
+        contours = measure.find_contours(mask, 0.5, positive_orientation='low')
+        segmentations = []
+        polygons = []
+        for contour in contours:
+            for i in range(len(contour)):
+                row, col = contour[i]
+                contour[i] = (col - 1, row - 1)
+
+            poly = Polygon(contour)
+            poly = poly.simplify(1.0, preserve_topology=True)
+            polygons.append(poly)
+            segmentation = np.array(poly.exterior.coords).ravel().tolist()
+            segmentations.append(segmentation)
+
+        multi_poly = MultiPolygon(polygons)
+        x, y, max_x, max_y = multi_poly.bounds
+        bbox = (x, y, max_x, max_y)
+        area = multi_poly.area
+
+        data = {}
+        data["boxes"] =  bbox
+        data["area"] = area
+        data["labels"] =  torch.ones((num_objs,), dtype=torch.int64)   
+        data["masks"] = mask
+
+        return data

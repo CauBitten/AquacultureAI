@@ -5,7 +5,7 @@ from skimage import measure
 from shapely.geometry import Polygon, MultiPolygon
 from tqdm import tqdm
 
-def training_loop(epochs, model, train_loader, valid_loader, criterion, optimizer, device, dtype, deeplab = False, rcnn = False):
+def training_loop(epochs, model, train_loader, valid_loader, criterion, optimizer, device, dtype):
     train_losses = []
     train_iou_list = []
     valid_losses = []
@@ -14,12 +14,12 @@ def training_loop(epochs, model, train_loader, valid_loader, criterion, optimize
     for e in range(epochs):
         print("Epoch {0} out of {1}".format(e+1, epochs))
         
-        model, optimizer, train_loss, train_iou = train(model, train_loader, criterion, optimizer, device, dtype, deeplab, rcnn)
+        model, optimizer, train_loss, train_iou = train(model, train_loader, criterion, optimizer, device, dtype)
         train_losses.append(train_loss)
         train_iou_list.append(train_iou)
         
         with torch.no_grad():
-            model, valid_loss, valid_iou = valid(model, valid_loader, criterion, device, deeplab, rcnn)
+            model, valid_loss, valid_iou = valid(model, valid_loader, criterion, device)
             valid_losses.append(valid_loss)
             valid_iou_list.append(valid_iou)
         
@@ -30,24 +30,23 @@ def training_loop(epochs, model, train_loader, valid_loader, criterion, optimize
     
     return model, optimizer, train_losses, valid_losses, train_iou_list, valid_iou_list
 
-def train(model, train_loader, criterion, optimizer, device, dtype, deeplab = False, rcnn = False):
+def train(model, train_loader, criterion, optimizer, device, dtype):
     model.train()
     running_loss = 0
     running_iou = 0
     
     for i, (x, y, z) in enumerate(tqdm(train_loader)):
         x = x.to(device, dtype=dtype)
-        pred = model(x)
-        if deeplab:
-            pred = pred['out']
-        if rcnn:
-            y = create_sub_mask_annotation(y)
-        y = y.to(device).type_as(pred)
-        loss = criterion(pred, y)
-
-        loss.backward()
+        x = x.to(device)
+        y = [create_sub_mask_annotation(m) for m in y]
+        y = y.swapaxes(1, 3).swapaxes(2, 3)
+        y.to(device)
+        loss_dict = model(x, y)
+        losses = sum(loss for loss in loss_dict.values())
+        losses.backward()
         optimizer.step()
-        optimizer.zero_grad()
+        print(loss_dict)
+        #optimizer.zero_grad()
         
         with torch.no_grad():
             running_loss += loss.item()
@@ -61,7 +60,7 @@ def train(model, train_loader, criterion, optimizer, device, dtype, deeplab = Fa
     
     return model, optimizer, epoch_loss, epoch_iou
 
-def valid(model, valid_loader, criterion, device, deeplab = False, rcnn = False):
+def valid(model, valid_loader, criterion, device):
     model.eval()
     running_loss = 0
     running_iou = 0
@@ -69,14 +68,13 @@ def valid(model, valid_loader, criterion, device, deeplab = False, rcnn = False)
     for i, (x, y, z) in enumerate(valid_loader):
 
         x = x.to(device)
-        y = y.to(device)
-        pred = model(x)
-        if deeplab:
-            pred = pred['out']
-        if rcnn:
-            y = create_sub_mask_annotation(y)
-        loss = criterion(pred, y)
-        running_loss += loss.item()
+        y = [create_sub_mask_annotation(m) for m in y]
+        y = y.swapaxes(1, 3).swapaxes(2, 3)
+        y.to(device)
+        loss_dict = model(x, y)
+        losses = sum(loss for loss in loss_dict.values())
+        running_loss += losses
+        print(loss_dict)
         y_np = y.cpu().numpy()
         pred_np = pred.cpu().numpy()
         pred_np = (pred_np > 0.5) * 255
@@ -95,7 +93,7 @@ def iou_np(mask, pred):
     return iou_score
 
 
-def predict(model, image, img_size, threshold, device, deeplab = False, rcnn = False):
+def predict(model, image, img_size, threshold, device):
     with torch.no_grad():
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = image.astype("float32") / 255.0
@@ -118,26 +116,8 @@ def predict(model, image, img_size, threshold, device, deeplab = False, rcnn = F
         return predMask
 
 
-def evaluate_test(model, test_loader, threshold, device, deeplab = False, rcnn = False):
-    running_iou = 0
-    with torch.no_grad():
-        for i, (x, y, z) in enumerate(test_loader):
-            x = x.to(device)
-            y = y.to(device)
-            pred = model(x)
-            if deeplab:
-                pred = pred['out']
-            if rcnn:
-                y = create_sub_mask_annotation(y)
-            y_np = y.cpu().numpy()
-            pred_np = pred.cpu().numpy()
-            pred_np = (pred_np > threshold) * 255
-            running_iou += iou_np(y_np, pred_np)
-        test_iou = (running_iou / (i + 1)) * 100
-
-    return test_iou
-
 def create_sub_mask_annotation(mask, num_objs = 1):
+        print(mask.shape)
         contours = measure.find_contours(mask, 0.5, positive_orientation='low')
         segmentations = []
         polygons = []
